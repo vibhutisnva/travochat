@@ -6,11 +6,10 @@ class ChatWidget {
     this.email = localStorage.getItem('email') || '';
     this.session = 0;
     this.serviceStatus = false;
-    this.apiBaseUrl = options.apiBaseUrl || ''; // Base URL for chat service APIs
+    this.apiBaseUrl = options.apiBaseUrl || '';
     this.init();
   }
 
-  // Initialize chat widget
   init() {
     this.createChatUI();
     this.attachEventListeners();
