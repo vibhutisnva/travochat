@@ -1,3 +1,53 @@
+class ChatService {
+  constructor(apiBaseUrl) {
+    this.apiBaseUrl = apiBaseUrl || '';
+    this.stompClient = null;
+    this.messageListeners = [];
+  }
+
+  connect() {
+    const socket = new SockJS(`${this.apiBaseUrl}/ws`);
+    this.stompClient = Stomp.over(socket);
+    this.stompClient.connect({}, () => {
+      console.log('Connected to WebSocket');
+      this.stompClient.subscribe('/topic/messages', (message) => {
+        const parsedMessage = JSON.parse(message.body);
+        this.messageListeners.forEach((listener) => listener(parsedMessage));
+      });
+    });
+  }
+
+  onMessage(callback) {
+    if (typeof callback === 'function') {
+      this.messageListeners.push(callback);
+    }
+  }
+
+  async registerUser(name, email) {
+    const response = await fetch(`${this.apiBaseUrl}/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email }),
+    });
+    return response.json();
+  }
+
+  async startSession(userId) {
+    const response = await fetch(`${this.apiBaseUrl}/start?userId=${userId}`);
+    return response.json();
+  }
+
+  async checkUser(email) {
+    const response = await fetch(`${this.apiBaseUrl}/check?email=${email}`);
+    return response.json();
+  }
+
+  async sendMessage(content, sender, session) {
+    const message = { content, sender, session };
+    this.stompClient.send('/app/chat', {}, JSON.stringify(message));
+  }
+}
+
 class ChatWidget {
   constructor(options) {
     this.options = options || {};
@@ -7,6 +57,7 @@ class ChatWidget {
     this.session = 0;
     this.serviceStatus = false;
     this.apiBaseUrl = options.apiBaseUrl || '';
+    this.chatService = new ChatService(this.apiBaseUrl);
     this.init();
   }
 
@@ -26,7 +77,6 @@ class ChatWidget {
     this.registerService();
   }
 
-  // Create chat UI
   createChatUI() {
     const chatContainer = document.createElement('div');
     chatContainer.id = 'chat-widget';
@@ -50,7 +100,6 @@ class ChatWidget {
     document.body.appendChild(chatContainer);
   }
 
-  // Attach event listeners
   attachEventListeners() {
     const registerButton = document.getElementById('registerButton');
     registerButton.addEventListener('click', () => {
@@ -67,15 +116,9 @@ class ChatWidget {
     });
   }
 
-  // Check user by email
   async checkUser(email) {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/checkUser`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const data = await response.json();
+      const data = await this.chatService.checkUser(email);
       if (data.data.session > 0) {
         this.session = data.data.session;
         localStorage.setItem('id', data.data.userId);
@@ -87,7 +130,6 @@ class ChatWidget {
     }
   }
 
-  // Register user
   async registerUser(name, email) {
     if (!name || !email) {
       alert('Please provide both name and email.');
@@ -95,12 +137,7 @@ class ChatWidget {
     }
 
     try {
-      const response = await fetch(`${this.apiBaseUrl}/registerUser`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email }),
-      });
-      const data = await response.json();
+      const data = await this.chatService.registerUser(name, email);
       if (data.statusCode === 200) {
         this.senderName = name;
         this.email = email;
@@ -117,15 +154,9 @@ class ChatWidget {
     }
   }
 
-  // Start session
   async startSession(userId) {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/startSession`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
-      });
-      const data = await response.json();
+      const data = await this.chatService.startSession(userId);
       if (data.statusCode === 200) {
         this.session = data.session;
         localStorage.setItem('id', data.userId);
@@ -137,7 +168,6 @@ class ChatWidget {
     }
   }
 
-  // Register service (connect to WebSocket)
   registerService() {
     if (!this.serviceStatus) {
       this.serviceStatus = true;
@@ -145,17 +175,14 @@ class ChatWidget {
     }
   }
 
-  // Connect to WebSocket
   connectToWebSocket() {
-    const socket = new WebSocket(`${this.apiBaseUrl.replace('http', 'ws')}/connect`);
-    socket.onmessage = (event) => {
-      const message = JSON.parse(event.data);
+    this.chatService.connect();
+    this.chatService.onMessage((message) => {
       this.messages.push(message);
       this.displayMessage(message);
-    };
+    });
   }
 
-  // Display message
   displayMessage(message) {
     const chatMessages = document.getElementById('chatMessages');
     const messageElement = document.createElement('div');
@@ -167,20 +194,11 @@ class ChatWidget {
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  // Send message
   async sendMessage(content) {
     if (!content.trim()) return;
     if (this.session > 0) {
       try {
-        await fetch(`${this.apiBaseUrl}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            content,
-            sender: this.senderName,
-            session: this.session,
-          }),
-        });
+        await this.chatService.sendMessage(content, this.senderName, this.session);
       } catch (error) {
         console.error('Error sending message:', error);
         alert('Error sending message');
@@ -190,7 +208,6 @@ class ChatWidget {
     }
   }
 
-  // Show chat view
   showChatView() {
     document.getElementById('registration-view').style.display = 'none';
     document.getElementById('chat-view').style.display = 'block';
